@@ -678,7 +678,7 @@ void DrawDeviceConnecting()
 void DrawDeviceControlsHeader()
 {
     MDRConnection* conn = clientPlatformConnectionGet();
-    bool isLegacy = gDevice.mProtocolVersion == MDRHeadphones::MDRProtocolVersion::V1;
+    bool isLegacy = gDevice.mProtocolVersion == mdr::MDRHeadphones::MDRProtocolVersion::V1;
     if (ImGui::BeginMenuBar())
     {
         auto& style = ImGui::GetStyle();
@@ -1377,7 +1377,7 @@ void DrawDeviceControlsTabs()
 {    
     if (ImGui::BeginTabBar("##Controls"))
     {
-        if (gDevice.mProtocolVersion == MDRHeadphones::MDRProtocolVersion::V1)
+        if (gDevice.mProtocolVersion == mdr::MDRHeadphones::MDRProtocolVersion::V1)
         {
             if (ImGui::BeginTabItem("Legacy"))
             {
