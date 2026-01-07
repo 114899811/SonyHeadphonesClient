@@ -110,7 +110,7 @@ namespace mdr
         std::ranges::fill(mSupport.table1Functions, false);
         std::ranges::fill(mSupport.table2Functions, false);
 
-        SendCommandACK(v2::t1::ConnectGetProtocolInfo);
+        SendCommandImpl<v2::t1::ConnectGetProtocolInfo>();
         int res = co_await Await(AWAIT_PROTOCOL_INFO);
         if (res != MDR_RESULT_OK || !mProtocol.hasTable1)
         {
