@@ -4,9 +4,13 @@ on:
   push:
     branches:
     - rewrite
+    - main
+    - master
   pull_request:
     branches:
     - rewrite
+    - main
+    - master
   workflow_dispatch:
 
 env:  

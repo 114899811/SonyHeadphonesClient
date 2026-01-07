@@ -472,6 +472,86 @@ enum
 } connState{CONN_STATE_NO_CONNECTION};
 #pragma endregion
 
+enum ServiceUuidMode
+{
+    SERVICE_UUID_AUTO = 0,
+    SERVICE_UUID_XM5_ONLY = 1,
+    SERVICE_UUID_SPP_ONLY = 2,
+    SERVICE_UUID_CUSTOM = 3
+};
+
+static constexpr const char* kServiceModeLabels[] = {
+    "Auto (XM5/6 then SPP)",
+    "XM5/6 only",
+    "Legacy SPP only",
+    "Custom"
+};
+
+static int gServiceUuidMode = SERVICE_UUID_AUTO;
+static char gCustomServiceUuid[64] = MDR_SERVICE_UUID_XM5;
+static String gConnectMacAddress;
+static Vector<String> gConnectServiceUuids;
+static size_t gConnectServiceIndex = 0;
+
+static const char* CurrentServiceUuid()
+{
+    if (gConnectServiceIndex >= gConnectServiceUuids.size())
+        return "";
+    return gConnectServiceUuids[gConnectServiceIndex].c_str();
+}
+
+static void BuildServiceUuidList()
+{
+    gConnectServiceUuids.clear();
+    switch (gServiceUuidMode)
+    {
+    case SERVICE_UUID_AUTO:
+        gConnectServiceUuids.emplace_back(MDR_SERVICE_UUID_XM5);
+        gConnectServiceUuids.emplace_back(MDR_SERVICE_UUID_SPP);
+        break;
+    case SERVICE_UUID_XM5_ONLY:
+        gConnectServiceUuids.emplace_back(MDR_SERVICE_UUID_XM5);
+        break;
+    case SERVICE_UUID_SPP_ONLY:
+        gConnectServiceUuids.emplace_back(MDR_SERVICE_UUID_SPP);
+        break;
+    case SERVICE_UUID_CUSTOM:
+        if (gCustomServiceUuid[0] != '\0')
+            gConnectServiceUuids.emplace_back(gCustomServiceUuid);
+        break;
+    default:
+        gConnectServiceUuids.emplace_back(MDR_SERVICE_UUID_XM5);
+        break;
+    }
+}
+
+static int StartConnect(MDRConnection* conn, const char* macAddress)
+{
+    gConnectMacAddress = macAddress ? macAddress : "";
+    BuildServiceUuidList();
+    gConnectServiceIndex = 0;
+    if (gConnectServiceUuids.empty())
+        return MDR_RESULT_ERROR_BAD_ADDRESS;
+    return mdrConnectionConnect(conn, gConnectMacAddress.c_str(),
+                                gConnectServiceUuids[gConnectServiceIndex].c_str());
+}
+
+static bool TryNextServiceUuid(MDRConnection* conn)
+{
+    if (gConnectServiceIndex + 1 >= gConnectServiceUuids.size())
+        return false;
+    ++gConnectServiceIndex;
+    mdrConnectionDisconnect(conn);
+    int res = mdrConnectionConnect(conn, gConnectMacAddress.c_str(),
+                                   gConnectServiceUuids[gConnectServiceIndex].c_str());
+    if (res == MDR_RESULT_OK || res == MDR_RESULT_INPROGRESS)
+    {
+        connState = CONN_STATE_CONNECTING;
+        return true;
+    }
+    return false;
+}
+
 void ExceptionHandler(auto&& func)
 {
     try
@@ -514,11 +594,18 @@ void DrawDeviceDiscovery()
         {
             ImGui::TextWrapped(PSI_WARNING_SIGN " No devices available. Make sure your Bluetooth radio is turned on, and a compatible device is connected.");
         }
+        ImGui::SeparatorText("Service");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        ImGui::Combo("##ServiceMode", &gServiceUuidMode, kServiceModeLabels, IM_ARRAYSIZE(kServiceModeLabels));
+        if (gServiceUuidMode == SERVICE_UUID_CUSTOM)
+        {
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            ImGui::InputText("##ServiceUuid", gCustomServiceUuid, sizeof(gCustomServiceUuid));
+        }
         ImGui::BeginDisabled(devices.empty());
         if (ImModalButton(PSI_LINK " Connect", 0, 2))
         {
-            // XXX: Other service UUIDs?
-            int res = mdrConnectionConnect(conn, devices[deviceIndex].szDeviceMacAddress, MDR_SERVICE_UUID_XM5);
+            int res = StartConnect(conn, devices[deviceIndex].szDeviceMacAddress);
             if (res != MDR_RESULT_OK && res != MDR_RESULT_INPROGRESS)
                 connState = CONN_STATE_DISCONNECTED;
             else
@@ -565,6 +652,7 @@ void DrawDeviceConnecting()
             ImSpinner(1000.0f, 24.0f, IM_COL32(255, 255, 255, 255), 2.0f, true, false, 2.0f, ImEaseInOutCubic);
             ImGui::NewLine();
             ImTextCentered(mdrConnectionGetLastError(conn));
+            ImTextCentered(fmt::format("Service UUID: {}", CurrentServiceUuid()).c_str());
             ImGui::NewLine();
             if (ImModalButton(PSI_REMOVE " Cancel"))
             {
@@ -578,6 +666,8 @@ void DrawDeviceConnecting()
     }
     default:
     {
+        if (TryNextServiceUuid(conn))
+            return;
         connState = CONN_STATE_DISCONNECTED;
         mdrConnectionDisconnect(conn);
         break;

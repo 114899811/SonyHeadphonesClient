@@ -44,11 +44,11 @@ struct MDRConnectionWindows
         WCHAR szMessage[1024];
         if (FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), szMessage,
                            sizeof(szMessage), NULL) == 0)
-            return "Unknown Error";
+            return fmt::format("Win32 error {}", err);
         std::string res = ToU8String(szMessage);
-        res.pop_back(); // \n
-        res.pop_back(); // \r
-        return res;
+        while (!res.empty() && (res.back() == '\n' || res.back() == '\r'))
+            res.pop_back();
+        return fmt::format("{} ({})", res, err);
     }
     static int Connect(void* user, const char* macAddress, const char* serviceUUID) noexcept
     {
@@ -64,16 +64,17 @@ struct MDRConnectionWindows
             gWSAStartup = true;
         }
         ptr->conn = socket(AF_BTH, SOCK_STREAM, BTHPROTO_RFCOMM);
+        if (ptr->conn == INVALID_SOCKET)
+        {
+            ptr->lastError = FormatErrorString(WSAGetLastError());
+            return MDR_RESULT_ERROR_NET;
+        }
         ULONG nonblock = 1;
         if (ioctlsocket(ptr->conn, FIONBIO, &nonblock) != 0)
         {
-            ptr->lastError = FormatErrorString(::GetLastError());
+            ptr->lastError = FormatErrorString(WSAGetLastError());
             closesocket(ptr->conn);
-            return 1;
-        }
-        if (ptr->conn == INVALID_SOCKET)
-        {
-            ptr->lastError = FormatErrorString(::GetLastError());
+            ptr->conn = INVALID_SOCKET;
             return MDR_RESULT_ERROR_NET;
         }
         ULONG enable = TRUE;
@@ -89,6 +90,12 @@ struct MDRConnectionWindows
             return MDR_RESULT_ERROR_NET;
         }
         sab.btAddr = macAddressToULL(macAddress);
+        if (sab.btAddr == ~0ULL)
+        {
+            closesocket(ptr->conn);
+            ptr->lastError = "Invalid MAC address";
+            return MDR_RESULT_ERROR_BAD_ADDRESS;
+        }
         int ret = ::connect(ptr->conn, (sockaddr*)&sab, sizeof(sab));
         if (ret == SOCKET_ERROR)
         {

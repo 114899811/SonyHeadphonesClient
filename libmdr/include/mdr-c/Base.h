@@ -56,6 +56,8 @@
 // Service UUIDs
 // XM5s and newer
 #define MDR_SERVICE_UUID_XM5 "956C7B26-D49A-4BA8-B03F-B17D393CB6E2"
+// Legacy devices often expose Serial Port Profile (SPP).
+#define MDR_SERVICE_UUID_SPP "00001101-0000-1000-8000-00805F9B34FB"
 #ifdef __cplusplus
 extern "C" {
 #endif
