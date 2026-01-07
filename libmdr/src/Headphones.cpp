@@ -62,6 +62,8 @@ namespace mdr
         dirty |= mMultipointDeviceMac.dirty() || mSafeListeningPreviewMode.dirty();
         dirty |= mPairedDeviceConnectMac.dirty() || mPairedDeviceDisconnectMac.dirty() || mPairedDeviceUnpairMac.
             dirty();
+        dirty |= mLegacyAmbientSoundControl.dirty() || mLegacyFocusOnVoice.dirty() || mLegacyAsmLevel.dirty();
+        dirty |= mLegacyVptType.dirty() || mLegacySurroundPosition.dirty();
         return dirty;
     }
 
@@ -114,10 +116,32 @@ namespace mdr
             break;
         case DATA_MDR:
             SendACK(seq);
-            return HandleCommandV2T1(command, seq);
+            if (mProtocolVersion == MDRProtocolVersion::V1)
+                return MDR_HEADPHONES_EVT_UNHANDLED;
+            try
+            {
+                return HandleCommandV2T1(command, seq);
+            }
+            catch (const std::runtime_error&)
+            {
+                if (mProtocolVersion == MDRProtocolVersion::UNKNOWN)
+                    return MDR_HEADPHONES_EVT_UNHANDLED;
+                throw;
+            }
         case DATA_MDR_NO2:
             SendACK(seq);
-            return HandleCommandV2T2(command, seq);
+            if (mProtocolVersion == MDRProtocolVersion::V1)
+                return MDR_HEADPHONES_EVT_UNHANDLED;
+            try
+            {
+                return HandleCommandV2T2(command, seq);
+            }
+            catch (const std::runtime_error&)
+            {
+                if (mProtocolVersion == MDRProtocolVersion::UNKNOWN)
+                    return MDR_HEADPHONES_EVT_UNHANDLED;
+                throw;
+            }
         default:
             break;
         }

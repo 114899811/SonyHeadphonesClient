@@ -6,8 +6,20 @@ namespace mdr
     using namespace v2;
     MDRTask MDRHeadphones::RequestInitV2()
     {
+        mProtocolVersion = MDRProtocolVersion::UNKNOWN;
+        mProtocol = {};
+        std::ranges::fill(mSupport.table1Functions, false);
+        std::ranges::fill(mSupport.table2Functions, false);
         SendCommandACK(t1::ConnectGetProtocolInfo);
         co_await Await(AWAIT_PROTOCOL_INFO);
+        MDR_CHECK_MSG(mProtocol.hasTable1, "Device doesn't support MDR V2 Table 1");
+        mProtocolVersion = MDRProtocolVersion::V2;
+        co_await RequestInitV2AfterProtocolInfo();
+        co_return MDR_HEADPHONES_TASK_INIT_OK;
+    }
+
+    MDRTask MDRHeadphones::RequestInitV2AfterProtocolInfo()
+    {
         MDR_CHECK_MSG(mProtocol.hasTable1, "Device doesn't support MDR V2 Table 1");
         SendCommandACK(t1::ConnectGetCapabilityInfo);
 

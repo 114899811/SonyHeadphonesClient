@@ -1,5 +1,6 @@
 #pragma once
 #include "Command.hpp"
+#include "ProtocolV1.hpp"
 #include "ProtocolV2T1.hpp"
 #include "ProtocolV2T2.hpp"
 #include <mdr-c/Headphones.h>
@@ -113,6 +114,13 @@ namespace mdr
         MDRConnection* mConn;
 
     public:
+        enum class MDRProtocolVersion
+        {
+            UNKNOWN = 0,
+            V1 = 1,
+            V2 = 2
+        };
+
         enum AwaitType
         {
             // Wait for an immediate ACK from the device on the current task
@@ -231,6 +239,8 @@ namespace mdr
             int hasTable1;
             int hasTable2;
         } mProtocol{};
+
+        MDRProtocolVersion mProtocolVersion{MDRProtocolVersion::UNKNOWN};
 
         // @ref HandleSupportFunctionT1
         // Q: Why not std::bitset?
@@ -359,9 +369,21 @@ namespace mdr
         MDRProperty<String> mPairedDeviceDisconnectMac, mPairedDeviceConnectMac, mPairedDeviceUnpairMac;
 
         MDRProperty<bool> mSafeListeningPreviewMode;
+
+        MDRProperty<bool> mLegacyAmbientSoundControl;
+        MDRProperty<bool> mLegacyFocusOnVoice;
+        MDRProperty<int> mLegacyAsmLevel;
+        MDRProperty<int> mLegacyVptType;
+        MDRProperty<v1::SoundPositionPreset> mLegacySurroundPosition;
 #pragma endregion
 
 #pragma region Tasks
+        /**
+         * @brief Send initialization payloads to the device, auto-detecting protocol.
+         * @note  To be used with @ref Invoke.
+         * @return @ref MDR_HEADPHONES_TASK_INIT_OK on completion (returned in @ref PollEvents)
+         **/
+        MDRTask RequestInitAuto();
         /**
          * @brief Send initialization payloads to the headphones.
          * @note  To be used with @ref Invoke.
@@ -369,17 +391,47 @@ namespace mdr
          **/
         MDRTask RequestInitV2();
         /**
+         * @brief Send initialization payloads to the headphones (legacy MDR v1).
+         * @note  To be used with @ref Invoke.
+         * @return @ref MDR_HEADPHONES_TASK_INIT_OK on completion (returned in @ref PollEvents)
+         **/
+        MDRTask RequestInitV1();
+        /**
+         * @brief Requests states that the device won't send automatically for legacy MDR v1.
+         * @note  To be used with @ref Invoke.
+         * @return @ref MDR_HEADPHONES_TASK_SYNC_OK on completion (returned in @ref PollEvents)
+         **/
+        MDRTask RequestSyncV1();
+        /**
          * @brief Requests states that the device won't send automatically. (e.g. Battery levels)
          * @note  To be used with @ref Invoke.
          * @return @ref MDR_HEADPHONES_TASK_SYNC_OK on completion (returned in @ref PollEvents)
          **/
         MDRTask RequestSyncV2();
         /**
+         * @brief Requests states that the device won't send automatically (auto).
+         * @note  To be used with @ref Invoke.
+         * @return @ref MDR_HEADPHONES_TASK_SYNC_OK on completion (returned in @ref PollEvents)
+         **/
+        MDRTask RequestSyncAuto();
+        /**
+         * @brief Requests all changed @ref MDRProperty up until this point to be set on legacy MDR v1 devices.
+         * @note  To be used with @ref Invoke.
+         * @return @ref MDR_HEADPHONES_TASK_COMMIT_OK on completion (returned in @ref PollEvents)
+         */
+        MDRTask RequestCommitV1();
+        /**
          * @brief Requests all changed @ref MDRProperty up until this point to be set on the device
          * @note  To be used with @ref Invoke.
          * @return @ref MDR_HEADPHONES_TASK_COMMIT_OK on completion (returned in @ref PollEvents)
          */
         MDRTask RequestCommitV2();
+        /**
+         * @brief Requests all changed @ref MDRProperty up until this point to be set on the device (auto).
+         * @note  To be used with @ref Invoke.
+         * @return @ref MDR_HEADPHONES_TASK_COMMIT_OK on completion (returned in @ref PollEvents)
+         */
+        MDRTask RequestCommitAuto();
 #pragma endregion
 
     private:
@@ -441,6 +493,8 @@ namespace mdr
         int HandleCommandV2T1(Span<const UInt8> cmd, MDRCommandSeqNumber seq);
         int HandleCommandV2T2(Span<const UInt8> cmd, MDRCommandSeqNumber seq);
         void HandleAck(MDRCommandSeqNumber seq);
+
+        MDRTask RequestInitV2AfterProtocolInfo();
     };
 }
 

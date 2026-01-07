@@ -635,7 +635,7 @@ void DrawDeviceConnecting()
         gDevice = mdr::MDRHeadphones(conn);
         // Do an init - this should always be possible when @ref MDRHeadphones
         // is first created.
-        MDR_CHECK(gDevice.Invoke(gDevice.RequestInitV2()) == MDR_RESULT_OK);
+        MDR_CHECK(gDevice.Invoke(gDevice.RequestInitAuto()) == MDR_RESULT_OK);
         return;
     case MDR_RESULT_ERROR_TIMEOUT:
     case MDR_RESULT_INPROGRESS:
@@ -678,18 +678,24 @@ void DrawDeviceConnecting()
 void DrawDeviceControlsHeader()
 {
     MDRConnection* conn = clientPlatformConnectionGet();
+    bool isLegacy = gDevice.mProtocolVersion == MDRHeadphones::MDRProtocolVersion::V1;
     if (ImGui::BeginMenuBar())
     {
         auto& style = ImGui::GetStyle();
         /* Disconnect & Shutdown */
-        if (ImGui::BeginMenu(fmt::format( PSI_CHEVRON_DOWN " {}", gDevice.mModelName).c_str()))
+        String deviceLabel = gDevice.mModelName.empty()
+            ? (isLegacy ? "Legacy Device" : "Unknown Device")
+            : gDevice.mModelName;
+        if (isLegacy)
+            deviceLabel = fmt::format("{} (MDR V1)", deviceLabel);
+        if (ImGui::BeginMenu(fmt::format( PSI_CHEVRON_DOWN " {}", deviceLabel).c_str()))
         {
             if (ImGui::MenuItem(PSI_UNLINK " Disconnect"))
             {
                 mdrConnectionDisconnect(conn);
                 connState = CONN_STATE_NO_CONNECTION;
             }
-            if (gDevice.mSupport.contains(v2::MessageMdrV2FunctionType_Table1::POWER_OFF))
+            if (!isLegacy && gDevice.mSupport.contains(v2::MessageMdrV2FunctionType_Table1::POWER_OFF))
             {
                 if (ImGui::MenuItem(PSI_OFF " Shutdown"))
                     gDevice.mShutdown.desired = true;
@@ -704,12 +710,16 @@ void DrawDeviceControlsHeader()
         Array<Badge, 4> badges4;
         Badge *badgeFirst = &badges4[0], *badgeLast = &badges4[0];
         /* Codec */
-        if (gDevice.mSupport.contains(v2::MessageMdrV2FunctionType_Table1::CODEC_INDICATOR))
+        if (isLegacy)
+        {
+            *(badgeLast++) = {"MDR V1", ~0u, ~0u};
+        }
+        if (!isLegacy && gDevice.mSupport.contains(v2::MessageMdrV2FunctionType_Table1::CODEC_INDICATOR))
         {
             *(badgeLast++) = {FormatEnum(gDevice.mAudioCodec), ~0u, ~0u};
         }
         /* DSEE */
-        if (gDevice.mUpscalingEnabled.current)
+        if (!isLegacy && gDevice.mUpscalingEnabled.current)
         {
             *(badgeLast++) = {FormatEnum(gDevice.mUpscalingType), ~0u, ~0u};
         }
@@ -985,6 +995,87 @@ void DrawDeviceControlsSound()
         ImGui::EndDisabled();
         ImGui::TreePop();
     }
+}
+
+void DrawDeviceControlsLegacy()
+{
+    constexpr int kLegacyAsmMin = -1;
+    constexpr int kLegacyAsmMax = 20;
+    constexpr int kLegacyMinFocusStep = 2;
+    constexpr const char* kLegacyVptLabels[] = {
+        "Off",
+        "Outdoor Festival",
+        "Arena",
+        "Concert Hall",
+        "Club"
+    };
+    struct LegacySoundPosition
+    {
+        v1::SoundPositionPreset value;
+        const char* label;
+    };
+    constexpr LegacySoundPosition kLegacyPositions[] = {
+        {v1::SoundPositionPreset::OFF, "Off"},
+        {v1::SoundPositionPreset::FRONT_LEFT, "Front Left"},
+        {v1::SoundPositionPreset::FRONT_RIGHT, "Front Right"},
+        {v1::SoundPositionPreset::FRONT, "Front"},
+        {v1::SoundPositionPreset::REAR_LEFT, "Rear Left"},
+        {v1::SoundPositionPreset::REAR_RIGHT, "Rear Right"},
+    };
+
+    ImGui::SeparatorText("Ambient Sound Control");
+    ImGui::Checkbox("Enabled", &gDevice.mLegacyAmbientSoundControl.desired);
+    ImGui::BeginDisabled(!gDevice.mLegacyAmbientSoundControl.desired);
+    int sliderValue = gDevice.mLegacyAsmLevel.desired - 1;
+    if (ImGui::SliderInt("##LegacyAsmLevel", &sliderValue, kLegacyAsmMin, kLegacyAsmMax))
+        gDevice.mLegacyAsmLevel.desired = sliderValue + 1;
+    bool focusAvailable = gDevice.mLegacyAmbientSoundControl.desired &&
+                          gDevice.mLegacyAsmLevel.desired > kLegacyMinFocusStep;
+    if (!focusAvailable)
+        gDevice.mLegacyFocusOnVoice.desired = false;
+    ImGui::BeginDisabled(!focusAvailable);
+    ImGui::Checkbox("Focus on Voice", &gDevice.mLegacyFocusOnVoice.desired);
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Virtual Surround (VPT)");
+    int vptPreset = gDevice.mLegacyVptType.desired;
+    if (vptPreset < 0 || vptPreset >= IM_ARRAYSIZE(kLegacyVptLabels))
+        vptPreset = 0;
+    if (ImGui::Combo("Preset", &vptPreset, kLegacyVptLabels, IM_ARRAYSIZE(kLegacyVptLabels)))
+        gDevice.mLegacyVptType.desired = vptPreset;
+
+    bool vptActive = gDevice.mLegacyVptType.desired != 0;
+    ImGui::BeginDisabled(vptActive);
+    int posIndex = 0;
+    for (int i = 0; i < IM_ARRAYSIZE(kLegacyPositions); ++i)
+    {
+        if (kLegacyPositions[i].value == gDevice.mLegacySurroundPosition.desired)
+        {
+            posIndex = i;
+            break;
+        }
+    }
+    if (ImGui::Combo("Sound Position", &posIndex, [](void* data, int idx, const char** out_text)
+    {
+        auto* options = static_cast<const LegacySoundPosition*>(data);
+        *out_text = options[idx].label;
+        return true;
+    }, const_cast<LegacySoundPosition*>(kLegacyPositions), IM_ARRAYSIZE(kLegacyPositions)))
+    {
+        gDevice.mLegacySurroundPosition.desired = kLegacyPositions[posIndex].value;
+    }
+    ImGui::EndDisabled();
+    if (vptActive)
+        ImGui::TextDisabled("Sound Position is ignored while a VPT preset is active.");
+}
+
+void DrawDeviceControlsLegacyAbout()
+{
+    ImGui::Text("Protocol: MDR V1 (legacy)");
+    if (!gConnectMacAddress.empty())
+        ImGui::Text("MAC: %s", gConnectMacAddress.c_str());
+    ImGui::TextWrapped("Legacy devices expose a smaller set of controls.");
 }
 
 void DrawDeviceControlsDevices()
@@ -1286,30 +1377,46 @@ void DrawDeviceControlsTabs()
 {    
     if (ImGui::BeginTabBar("##Controls"))
     {
-        if (ImGui::BeginTabItem("Playback"))
-        {            
-            DrawDeviceControlsPlayback();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Sound"))
+        if (gDevice.mProtocolVersion == MDRHeadphones::MDRProtocolVersion::V1)
         {
-            DrawDeviceControlsSound();
-            ImGui::EndTabItem();
+            if (ImGui::BeginTabItem("Legacy"))
+            {
+                DrawDeviceControlsLegacy();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("About"))
+            {
+                DrawDeviceControlsLegacyAbout();
+                ImGui::EndTabItem();
+            }
         }
-        if (ImGui::BeginTabItem("Devices"))
+        else
         {
-            DrawDeviceControlsDevices();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("System"))
-        {
-            DrawDeviceControlsSystem();
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("About"))
-        {
-            DrawDeviceControlsAbout();
-            ImGui::EndTabItem();
+            if (ImGui::BeginTabItem("Playback"))
+            {
+                DrawDeviceControlsPlayback();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Sound"))
+            {
+                DrawDeviceControlsSound();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Devices"))
+            {
+                DrawDeviceControlsDevices();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("System"))
+            {
+                DrawDeviceControlsSystem();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("About"))
+            {
+                DrawDeviceControlsAbout();
+                ImGui::EndTabItem();
+            }
         }
         ImGui::EndTabBar();
     }
@@ -1332,12 +1439,12 @@ void DrawDeviceControls()
         case MDR_HEADPHONES_TASK_INIT_OK:
             // Request for a stat update ASAP
             // User may request for this themselves - we don't do periodic checks this time
-            MDR_CHECK(gDevice.Invoke(gDevice.RequestSyncV2()) == MDR_RESULT_OK);
+            MDR_CHECK(gDevice.Invoke(gDevice.RequestSyncAuto()) == MDR_RESULT_OK);
             return;
         case MDR_HEADPHONES_IDLE:
             // Commit changes if needed to
             if (gDevice.IsDirty())
-                MDR_CHECK(gDevice.Invoke(gDevice.RequestCommitV2()) == MDR_RESULT_OK);
+                MDR_CHECK(gDevice.Invoke(gDevice.RequestCommitAuto()) == MDR_RESULT_OK);
             return;
         case MDR_HEADPHONES_ERROR:
             // Irrecoverable. Disconnect now.
